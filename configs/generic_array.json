@@ -1,0 +1,25 @@
+{
+  "name": "generic_array",
+  "robot_type": "custom_robot",
+  "task": "Pick and place.",
+  "timestamp_source": "log",
+  "action_alignment": "previous",
+  "state": [
+    {
+      "topic": "/robot/state",
+      "field": "values",
+      "names": ["joint_1.position", "joint_2.position", "gripper.position"],
+      "unit": "rad"
+    }
+  ],
+  "action": [
+    {
+      "topic": "/robot/action",
+      "field": "values",
+      "names": ["joint_1.target", "joint_2.target"],
+      "unit": "rad",
+      "max_age_ms": 300.0
+    }
+  ],
+  "cameras": {}
+}

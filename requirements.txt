@@ -1,0 +1,14 @@
+# Recommended runtime: Python 3.12, 64-bit Windows or Linux.
+# Install CPU Torch first as documented in README.md if no GPU is needed.
+-r requirements-audit.txt
+
+# Official LeRobot v3 writer and dataset dependencies (installed transitively).
+lerobot[dataset]==0.6.1
+torch==2.11.0
+torchvision==0.26.0
+
+# Parquet storage and PyAV video encoding/decoding.
+pyarrow==26.0.1
+av==15.1.0
+
+# Python, Git and optional system FFmpeg are installed outside pip; see README.md.

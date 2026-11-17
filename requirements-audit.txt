@@ -1,0 +1,4 @@
+# Python 3.12 recommended. Lightweight MCAP reading and --audit-only.
+numpy==2.2.6
+mcap==1.6.0
+mcap-ros2-support==0.6.0

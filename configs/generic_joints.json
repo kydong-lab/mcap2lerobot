@@ -1,0 +1,46 @@
+{
+  "name": "generic_joints",
+  "robot_type": "custom_arm",
+  "timestamp_source": "header",
+  "state": [
+    {
+      "topic": "/joint_states",
+      "mapping": "by_name",
+      "field": "position",
+      "joints": ["joint_1", "joint_2"],
+      "names": ["joint_1.position", "joint_2.position"],
+      "unit": "rad"
+    },
+    {
+      "topic": "/gripper/state",
+      "mapping": "scalar",
+      "field": "opening",
+      "names": ["gripper.opening"],
+      "unit": "m"
+    }
+  ],
+  "action": [
+    {
+      "topic": "/arm/command",
+      "mapping": "by_name",
+      "field": "position",
+      "joints": ["joint_1", "joint_2"],
+      "names": ["joint_1.target", "joint_2.target"],
+      "unit": "rad"
+    },
+    {
+      "topic": "/gripper/command",
+      "mapping": "scalar",
+      "field": "target",
+      "names": ["gripper.target"],
+      "unit": "m",
+      "max_age_ms": 1000.0
+    }
+  ],
+  "cameras": {
+    "front": {
+      "topic": "/camera/color/image_raw",
+      "info_topic": "/camera/color/camera_info"
+    }
+  }
+}
