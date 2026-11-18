@@ -94,10 +94,14 @@ class DatasetProfile:
     require_configuration: bool = False
     check_action_jumps: bool = False
     check_urdf: bool = False
+    # Camera whose frames define the output timeline; None keeps a fixed fps grid.
+    primary_camera: str | None = None
 
     def __post_init__(self) -> None:
         if not self.name or not self.state or not self.action:
             raise ValueError("Profile needs name, state and action sources")
+        if self.primary_camera is not None and self.primary_camera not in self.cameras:
+            raise ValueError(f"primary_camera {self.primary_camera!r} is not a configured camera")
         if self.action_alignment not in ("previous", "nearest"):
             raise ValueError("action_alignment must be previous or nearest")
         if self.timestamp_source not in ("header", "log"):

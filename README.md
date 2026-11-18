@@ -34,7 +34,7 @@ py -3.12 -m venv .venv312
 .\.venv312\Scripts\python.exe .\juliet_mcap_to_lerobot.py --input "E:\test-11-12" --output ".\output\juliet_v3" --repo-id "local/juliet_v3" --config .\configs\juliet_quality.json
 ```
 
-`--repo-id` 是数据集标识，不会自动上传。默认按 **30 FPS** 对齐：state 和图像选最近样本，action 使用当前时间之前最近的指令。写出后检查结构、帧数，并用官方加载器抽查，通过后才发布正式输出目录。
+`--repo-id` 是数据集标识，不会自动上传。Juliet 默认以主相机 `head` 的每一帧作为时间轴（profile 字段 `primary_camera`），主相机掉帧处按 30 FPS 补点并复用上一帧图像，连续掉帧超过 `max_primary_fill_frames` 则拒绝整集；未配置 `primary_camera` 的 profile 仍使用固定 30 FPS 网格。其余相机和 state 选最近样本，action 使用当前时间之前最近的指令。写出后检查结构、帧数，并用官方加载器抽查，通过后才发布正式输出目录。
 
 ## 3. 输出文件
 

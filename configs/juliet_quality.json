@@ -1,8 +1,9 @@
 {
   "fps": 30,
   "timestamp_source": "header",
-  "max_image_gap_ms": 15.0,
+  "max_image_gap_ms": 20.0,
   "max_state_gap_ms": 5.0,
+  "max_primary_fill_frames": 3,
   "max_arm_waist_age_ms": 150.0,
   "max_gripper_age_ms": 30000.0,
   "action_jump_rad": 0.1,

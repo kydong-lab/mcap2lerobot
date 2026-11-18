@@ -10,12 +10,12 @@ CHECKS = {
         "configuration_hash_mismatch", "empty_stream", "invalid_message", "missing_camera_info",
         "image_shape_mismatch", "calibration_changed", "invalid_state_shape", "nonfinite_action"}),
     "timestamps": ("时间戳顺序", {"non_increasing_timestamp", "insufficient_common_interval"}),
-    "alignment": ("多模态时间对齐", {"alignment_gap"}),
+    "alignment": ("多模态时间对齐", {"alignment_gap", "primary_frame_drop", "primary_period_anomaly"}),
     "action_freshness": ("指令时效", {"stale_command"}),
     "action_jumps": ("动作跳变", {"action_jump"}),
     "action_bounds": ("URDF 关节限位", {"urdf_limit", "missing_urdf"}),
     "image_quality": ("图像清晰度与亮度", {"image_quality"}),
-    "image_reuse": ("图像复用", {"reused_source_image"}),
+    "image_reuse": ("图像复用", {"reused_source_image", "primary_filled_frame"}),
 }
 
 
@@ -82,6 +82,8 @@ def episode_status_rows(report: dict[str, Any]) -> list[dict[str, Any]]:
                      "frame_interval": "[start_frame, end_frame)",
                      "frame_reference": "aligned_grid", "fps": report.get("config", {}).get("fps"),
                      "grid_start_ns": episode.get("grid_start_ns"),
+                     "grid_mode": episode.get("grid_mode"),
+                     "timeline": episode.get("timeline"),
                      "devices_id": episode.get("devices_id"), "calib_id": episode.get("calib_id"),
                      "operator_id": episode.get("operator_id"), "session": episode.get("session"),
                      "capture_state": episode.get("capture_state"),
@@ -172,6 +174,7 @@ function issueDetails(i){const details=Object.fromEntries(Object.entries(i).filt
 function renderDetail(){const e=eps.find(e=>e.input_index===selected);if(!e){document.getElementById('detail').innerHTML='<p class="muted">请选择一个 episode。</p>';return}
  document.getElementById('detail').innerHTML=`<div class="toolbar"><h2>输入 Episode #${e.input_index}</h2><div><button id="prev">上一集</button> <button id="next">下一集</button></div></div>${badge(e.status)} <b>${esc(e.name)}</b><p class="source muted">${esc(e.source)}</p><p>输出 episode：${esc(e.output_episode_index??'未写入')}　帧数：${e.frames||0}　时长：${fmt((e.frames||0)/fps)} 秒</p>`+
  table(['检查项','结果','详情'],e.checks.map(c=>[esc(c.label),badge(c.status),c.issues.length?c.issues.map(issueDetails).join(''):c.status==='passed'?'检查已执行，未触发对应规则。':'未执行或不适用；可能未开启，或该集在早期检查中被拒绝。']))+
+ (e.timeline?.mode==='primary_camera'?`<h3>时间轴</h3><p>以主相机 <b>${esc(e.timeline.primary_camera)}</b> 帧为基准：源帧 ${esc(e.timeline.primary_source_frames)}，补帧 ${esc(e.timeline.filled_frames)}，最长连续掉帧 ${esc(e.timeline.max_primary_drop_frames)}，实测 ${esc(fmt(e.timeline.primary_rate_hz))} Hz（漂移 ${esc(fmt(e.timeline.drift_ppm))} ppm）</p>`:'')+
  '<h3>相机对齐与质量</h3>'+table(['相机','源帧','输出帧','复用','最大误差 ms','质量警告帧'],Object.entries(e.cameras||{}).map(([n,c])=>[esc(n),c.source_frames,c.output_frames,c.reused_frames,fmt(c.max_alignment_gap_ms),c.quality_warning_frames].map(esc)))+
  '<details><summary>各流频率和时间间隔</summary>'+table(['数据流','样本数','中位频率 Hz','最大源间隔 ms'],Object.entries(e.timing||{}).map(([n,t])=>[n,t.count,fmt(t.median_hz),fmt(t.max_gap_ms)].map(esc)))+'</details>';
  document.getElementById('prev').onclick=()=>move(-1);document.getElementById('next').onclick=()=>move(1);

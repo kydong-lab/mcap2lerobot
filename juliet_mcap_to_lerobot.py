@@ -113,8 +113,10 @@ def annotation_row(prepared: PreparedEpisode, episode_index: int, fps: int,
                    supplied: dict[str, dict[str, Any]]) -> dict[str, Any]:
     name = episode_name(prepared.raw.source, prepared.raw.profile)
     row = copy.deepcopy(supplied.get(name, {"instruction_segments": []}))
-    if name in supplied and (row.get("grid_start_ns") != int(prepared.times[0]) or row.get("fps") != fps):
-        raise ValueError(f"{name}: annotation timeline differs; expected grid_start_ns and fps from audit")
+    grid_mode = prepared.report.get("grid_mode")
+    if name in supplied and (row.get("grid_start_ns") != int(prepared.times[0]) or row.get("fps") != fps
+                             or row.get("grid_mode", "fixed") != grid_mode):
+        raise ValueError(f"{name}: annotation timeline differs; expected grid_start_ns, fps and grid_mode from audit")
     segments = row.get("instruction_segments")
     if not isinstance(segments, list):
         raise ValueError("instruction_segments must be a list")
@@ -130,7 +132,7 @@ def annotation_row(prepared: PreparedEpisode, episode_index: int, fps: int,
         if success_frame is not None and (type(success_frame) is not int or not start <= success_frame < end):
             raise ValueError("success_frame_index must be an actual frame within [start,end), or null")
     row.update(episode_index=episode_index, source_episode=name, fps=fps,
-               grid_start_ns=int(prepared.times[0]))
+               grid_start_ns=int(prepared.times[0]), grid_mode=grid_mode)
     return row
 
 

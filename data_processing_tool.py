@@ -49,15 +49,16 @@ def juliet_profile() -> DatasetProfile:
     return DatasetProfile("juliet", state, action, cameras, robot_type="juliet",
                           task="Pick and place.", timestamp_source="header",
                           require_capture_metadata=True, require_configuration=True,
-                          check_action_jumps=True, check_urdf=True)
+                          check_action_jumps=True, check_urdf=True, primary_camera="head")
 
 
 @dataclass(frozen=True)
 class QualityConfig:
     fps: int = 30
     timestamp_source: str = "header"
-    max_image_gap_ms: float = 15.0
+    max_image_gap_ms: float = 20.0
     max_state_gap_ms: float = 5.0
+    max_primary_fill_frames: int = 3
     max_arm_waist_age_ms: float = 150.0
     max_gripper_age_ms: float = 30000.0
     action_jump_rad: float = 0.1
@@ -73,8 +74,8 @@ class QualityConfig:
         for key, value in asdict(self).items():
             if key != "timestamp_source" and (not np.isfinite(value) or value <= 0):
                 raise ValueError(f"{key} must be finite and positive")
-        if not isinstance(self.fps, int) or not isinstance(self.min_frames, int):
-            raise ValueError("fps and min_frames must be integers")
+        if not all(isinstance(v, int) for v in (self.fps, self.min_frames, self.max_primary_fill_frames)):
+            raise ValueError("fps, min_frames and max_primary_fill_frames must be integers")
 
 
 @dataclass
@@ -192,6 +193,32 @@ def causal_indices(source: np.ndarray, target: np.ndarray) -> np.ndarray:
     return np.searchsorted(source, target, side="right") - 1
 
 
+def primary_timeline(source: np.ndarray, fps: int) -> dict[str, Any]:
+    """Use every primary-camera frame as a grid point; fill drops at the nominal period.
+
+    A gap spanning k nominal periods gets k-1 evenly spaced fill points that reuse the
+    previous image (never a future one). Returns positions relative to ``source``.
+    """
+    period = 1e9 / fps
+    times, src, filled, drops, short = [int(source[0])], [0], [], [], []
+    for i in range(1, len(source)):
+        dt = int(source[i] - source[i - 1])
+        k = int(round(dt / period))
+        if k < 1:
+            short.append(len(times))
+            k = 1
+        if k > 1:
+            drops.append({"frame": len(times), "missing": k - 1, "gap_ms": dt / 1e6})
+        for j in range(1, k):
+            times.append(int(source[i - 1]) + round(j * dt / k))
+            src.append(i - 1)
+            filled.append(len(times) - 1)
+        times.append(int(source[i]))
+        src.append(i)
+    return {"times": np.asarray(times, dtype=np.int64), "src": np.asarray(src, dtype=np.int64),
+            "filled": filled, "drops": drops, "short": short}
+
+
 def _timing(raw: RawEpisode, name: str, stream: Stream) -> dict[str, Any]:
     times = np.asarray(stream.times, dtype=np.int64)
     if not len(times):
@@ -233,17 +260,56 @@ def prepare_episode(raw: RawEpisode, config: QualityConfig) -> PreparedEpisode |
         return report
     if any(x["severity"] == "error" for x in raw.issues):
         return finish()
+    primary = raw.profile.primary_camera
     streams = [*state_streams.values(), *raw.images.values()]
     start = max([s.times[0] for s in streams] + [s.times[0] for s in raw.commands.values()])
     end = min(s.times[-1] for s in streams)
     usable = raw.metadata.get("usable_start_at_utc")
     if usable:
         start = max(start, int(datetime.fromisoformat(usable).timestamp() * 1e9))
-    count = max(0, int((end - start) * config.fps // 1_000_000_000) + 1)
-    times = start + np.rint(np.arange(count) * (1e9 / config.fps)).astype(np.int64)
+    primary_src, primary_filled = None, []
+    if primary:
+        # Grid points are the primary camera's own frames inside the common interval.
+        head = np.asarray(raw.images[primary].times, dtype=np.int64)
+        first = int(np.searchsorted(head, start, side="left"))
+        last = int(np.searchsorted(head, end, side="right")) - 1
+        count = 0
+        if last >= first:
+            line = primary_timeline(head[first:last + 1], config.fps)
+            times, primary_src, count = line["times"], line["src"] + first, len(line["times"])
+            primary_filled = line["filled"]
+            span_s = (head[last] - head[first]) / 1e9
+            slots = count - 1
+            report["timeline"] = {
+                "mode": "primary_camera", "primary_camera": primary,
+                "primary_source_frames": last - first + 1, "filled_frames": len(line["filled"]),
+                "max_primary_drop_frames": max((d["missing"] for d in line["drops"]), default=0),
+                "primary_drops": line["drops"],
+                "primary_rate_hz": float(slots / span_s) if span_s > 0 else None,
+                "drift_ppm": (float((span_s * config.fps / slots - 1) * 1e6) if slots else None),
+            }
+            too_long = [d for d in line["drops"] if d["missing"] > config.max_primary_fill_frames]
+            if too_long:
+                issue(raw, "error", "primary_frame_drop", primary,
+                      frames=[d["frame"] for d in too_long],
+                      max_missing=max(d["missing"] for d in too_long),
+                      max_gap_ms=max(d["gap_ms"] for d in too_long),
+                      threshold_frames=config.max_primary_fill_frames)
+            if line["short"]:
+                issue(raw, "error", "primary_period_anomaly", primary, frames=line["short"],
+                      detail="primary frame interval shorter than half the nominal period")
+            if line["filled"]:
+                issue(raw, "warning", "primary_filled_frame", primary, frames=line["filled"])
+    else:
+        count = max(0, int((end - start) * config.fps // 1_000_000_000) + 1)
+        times = start + np.rint(np.arange(count) * (1e9 / config.fps)).astype(np.int64)
+        report["timeline"] = {"mode": "fixed"}
     if count < config.min_frames:
         issue(raw, "error", "insufficient_common_interval", "time", frames=count)
         return finish()
+    if any(x["severity"] == "error" for x in raw.issues):
+        return finish()
+    start = int(times[0])
     if raw.state_channels:
         states = np.column_stack([
             np.asarray(raw.state_channels[name].values)[nearest_indices(
@@ -257,8 +323,12 @@ def prepare_episode(raw: RawEpisode, config: QualityConfig) -> PreparedEpisode |
     image_indices = {}
     for name, stream in {**{f"state/{n}": s for n, s in state_streams.items()}, **raw.images}.items():
         source = np.asarray(stream.times, dtype=np.int64)
-        indices = nearest_indices(source, times)
+        is_primary = name == primary
+        # Primary frames map 1:1 (fill points causally reuse the previous frame).
+        indices = primary_src if is_primary else nearest_indices(source, times)
         gaps = abs(source[indices] - times) / 1e6
+        if is_primary:
+            gaps[primary_filled] = 0.0  # bounded by max_primary_fill_frames instead
         is_state = name.startswith("state/")
         limit = config.max_state_gap_ms if is_state else config.max_image_gap_ms
         if np.any(gaps > limit):
@@ -279,7 +349,7 @@ def prepare_episode(raw: RawEpisode, config: QualityConfig) -> PreparedEpisode |
                 "reused_frames": len(repeats), "max_alignment_gap_ms": float(gaps.max()),
                 "quality_warning_frames": len(bad),
             }
-            if len(repeats):
+            if len(repeats) and not is_primary:  # primary reuse == primary_filled_frame
                 issue(raw, "warning", "reused_source_image", name, frames=repeats.tolist())
     actions = np.empty((count, len(raw.action_names)), dtype=np.float32)
     age_limits = {name: spec.max_age_ms for spec in raw.profile.action for name in spec.names}
@@ -309,7 +379,7 @@ def prepare_episode(raw: RawEpisode, config: QualityConfig) -> PreparedEpisode |
               max_delta_rad=float(delta[rows, col].max()), max_speed_rad_s=float(speed[rows, col].max()),
               delta_threshold=config.action_jump_rad, speed_threshold=config.action_speed_rad_s)
     report.update(frames=count, grid_start_ns=int(start), grid_end_ns=int(times[-1]),
-                  timestamp_source=config.timestamp_source)
+                  grid_mode=report["timeline"]["mode"], timestamp_source=config.timestamp_source)
     report["completed_checks"].extend(["alignment", "action_freshness"])
     if raw.images:
         report["completed_checks"].extend(["image_quality", "image_reuse"])
